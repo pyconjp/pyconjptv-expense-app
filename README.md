@@ -46,4 +46,4 @@ PyCon JP AssociationではPyCon JPイベントやPython Boot Campなどさまざ
 
 ## 入力画面イメージ
 
-(TBD)
+![画面モック](mock.png)
