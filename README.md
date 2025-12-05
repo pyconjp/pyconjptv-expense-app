@@ -47,3 +47,16 @@ PyCon JP AssociationではPyCon JPイベントやPython Boot Campなどさまざ
 ## 入力画面イメージ
 
 ![画面モック](mock.png)
+
+## 出力項目とその仕様
+
+この段階では入力したデータを辞書またはdataclass等に保存し、コマンドライン等に出力するのみでOK。
+確認のためにJSON等でファイル保存をしてもよい。
+
+以下は保存されるデータのJSONのイメージ
+
+```json
+{
+  "TBD": "TBD"
+}
+```
