@@ -19,7 +19,31 @@ import pandas as pd
 
 df_items = pd.DataFrame(st.session_state.get("expense_items", []))
 if df_items.empty:
-    df_items = pd.DataFrame({"支払日": [], "店名": [], "金額": [], "内容": []})
+    # 空DataFrameでも支払日をオブジェクト型にしておく（FLOAT推論を防ぐ）
+    df_items = pd.DataFrame(
+        {
+            "支払日": pd.Series([], dtype="object"),
+            "店名": pd.Series([], dtype="object"),
+            "金額": pd.Series([], dtype="float"),
+            "内容": pd.Series([], dtype="object"),
+        }
+    )
+else:
+    # NaN を None にして dtype をオブジェクトへ寄せる
+    df_items = df_items.where(pd.notna(df_items), None)
+    # 支払日が float/NaN の場合は None に置換し、datetime.date へ変換
+    if "支払日" in df_items.columns:
+        df_items["支払日"] = df_items["支払日"].apply(
+            lambda v: None
+            if (v is None or (isinstance(v, float) and pd.isna(v)))
+            else v
+        )
+        try:
+            dt = pd.to_datetime(df_items["支払日"], errors="coerce")
+            df_items["支払日"] = dt.dt.date
+        except Exception:
+            # 変換失敗時はそのまま（オブジェクト型維持）
+            pass
 
 edited = st.data_editor(
     df_items,
@@ -35,12 +59,22 @@ edited = st.data_editor(
 
 # セッションへ反映（空行は除外）
 st.session_state["expense_items"] = []
-for _, row in edited.fillna("").iterrows():
-    if not (row.get("店名") or row.get("内容") or row.get("金額") not in [None, ""]):
+for _, row in edited.iterrows():
+    store = row.get("店名")
+    content = row.get("内容")
+    amount = row.get("金額")
+    # リストが来た場合は先頭要素に正規化
+    if isinstance(store, list):
+        store = store[0] if store else ""
+    if isinstance(content, list):
+        content = content[0] if content else ""
+    if isinstance(amount, list):
+        amount = amount[0] if amount else 0
+    if not (store or content or amount not in [None, ""]):
         continue
     val_date = row.get("支払日")
     iso_date = val_date.isoformat() if hasattr(val_date, "isoformat") else str(val_date)
-    amt = row.get("金額")
+    amt = amount
     try:
         amt_f = float(amt) if amt not in [None, ""] else 0.0
     except Exception:
@@ -48,9 +82,9 @@ for _, row in edited.fillna("").iterrows():
     st.session_state["expense_items"].append(
         {
             "支払日": iso_date,
-            "店名": row.get("店名") or "",
+            "店名": store or "",
             "金額": amt_f,
-            "内容": row.get("内容") or "",
+            "内容": content or "",
         }
     )
 
