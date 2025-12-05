@@ -5,7 +5,6 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
-DATA_FILE = Path("expenses.csv")
 CLAIMS_DIR = Path("claims")
 
 st.title("経費入力アプリ (デモ) — フェーズ2: 入力フォーム拡張")
@@ -88,10 +87,11 @@ for _, row in edited.iterrows():
         }
     )
 
-# 合計の即時更新
-total_amount = sum(
-    item.get("金額", 0) for item in st.session_state.get("expense_items", [])
+# 合計の即時更新（明細の合計）
+items_sum = sum(
+    (item.get("金額", 0) or 0) for item in st.session_state.get("expense_items", [])
 )
+total_amount = items_sum
 st.metric("合計金額 (JPY)", f"{total_amount:.0f}")
 
 st.header("申請情報と添付ファイル")
@@ -129,6 +129,35 @@ if submit:
     if not bank_name or not branch_name or not account_number or not account_holder:
         errors.append("振込先情報はすべて必須です。")
 
+    # 厳密なバリデーション（フェーズ3）
+    # 明細の各行チェック
+    for i, it in enumerate(st.session_state.get("expense_items", []), start=1):
+        # 日付必須
+        if not it.get("支払日"):
+            errors.append(f"明細 {i} の支払日は必須です。")
+        # 金額は正の数
+        amt = it.get("金額")
+        try:
+            amt_f = float(amt)
+        except Exception:
+            amt_f = -1
+        if amt_f <= 0:
+            errors.append(f"明細 {i} の金額は 0 より大きい必要があります。")
+
+    # 口座番号は数字のみ、7桁以上
+    if account_number:
+        if not account_number.isdigit():
+            errors.append("口座番号は数字のみで入力してください。")
+        elif len(account_number) < 7:
+            errors.append("口座番号は7桁以上で入力してください。")
+
+    # 合計検算（明細合計と一致）
+    calc_sum = sum(
+        (it.get("金額") or 0) for it in st.session_state.get("expense_items", [])
+    )
+    if abs(calc_sum - total_amount) > 0.0001:
+        errors.append("合計金額が明細の合計と一致していません。")
+
     if errors:
         for e in errors:
             st.error(e)
@@ -152,7 +181,7 @@ if submit:
             "申請者名": applicant,
             "タイトル": title,
             "経費種別": expense_type,
-            "合計金額": float(total_amount),
+            "合計金額": float(calc_sum),
             "経費項目リスト": json.dumps(
                 st.session_state.get("expense_items", []), ensure_ascii=False
             ),
@@ -165,13 +194,10 @@ if submit:
             "口座名義": account_holder,
             "created_at": datetime.now().isoformat(),
         }
-
-        if DATA_FILE.exists():
-            df = pd.read_csv(DATA_FILE)
-            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-        else:
-            df = pd.DataFrame([row])
-        df.to_csv(DATA_FILE, index=False)
+        # JSONへ保存（CSVは廃止）
+        json_path = dest_dir / "claim.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(row, f, ensure_ascii=False, indent=2)
 
         st.session_state["expense_items"] = []
         st.success(f"申請を保存しました。保存先: {dest_dir.as_posix()}")
@@ -180,9 +206,20 @@ if submit:
             for p in saved_paths:
                 st.write(p)
 
-if DATA_FILE.exists():
-    if st.checkbox("履歴を表示する"):
-        df = pd.read_csv(DATA_FILE)
-        st.dataframe(df.sort_values("created_at", ascending=False))
-else:
-    st.info("まだデータがありません。上のフォームで追加してください。")
+if st.checkbox("履歴を表示する"):
+    # claims配下の各申請フォルダの claim.json を読み込んで表示
+    records = []
+    if CLAIMS_DIR.exists():
+        for d in sorted(CLAIMS_DIR.glob("*/claim.json")):
+            try:
+                with open(d, "r", encoding="utf-8") as f:
+                    rec = json.load(f)
+                records.append(rec)
+            except Exception:
+                pass
+    if records:
+        df_hist = pd.DataFrame(records)
+        df_hist = df_hist.sort_values("created_at", ascending=False)
+        st.dataframe(df_hist)
+    else:
+        st.info("まだデータがありません。上のフォームで追加してください。")
