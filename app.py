@@ -6,6 +6,9 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from backend import JiraBackend, list_claims, validate_claim_dict
+from pydantic import ValidationError
+
 CLAIMS_DIR = Path("claims")
 
 st.title("経費入力アプリ (デモ) — フェーズ2: 入力フォーム拡張")
@@ -190,17 +193,22 @@ if submit:
             "口座名義": account_holder,
             "created_at": datetime.now().isoformat(),
         }
-        # JSONへ保存（CSVは廃止）
-        json_path = dest_dir / "claim.json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(row, f, ensure_ascii=False, indent=2)
+        try:
+            validated_row = validate_claim_dict(row)
+        except ValidationError as exc:
+            for err in exc.errors():
+                st.error(err.get("msg", "入力エラーが発生しました"))
+        else:
+            json_path = dest_dir / "claim.json"
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(validated_row, f, ensure_ascii=False, indent=2)
 
-        st.session_state["expense_items"] = []
-        st.success(f"申請を保存しました。保存先: {dest_dir.as_posix()}")
-        if saved_paths:
-            st.write("保存したファイル:")
-            for p in saved_paths:
-                st.write(p)
+            st.session_state["expense_items"] = []
+            st.success(f"申請を保存しました。保存先: {dest_dir.as_posix()}")
+            if saved_paths:
+                st.write("保存したファイル:")
+                for p in saved_paths:
+                    st.write(p)
 
 show_history = (
     st.toggle("履歴を表示する")
@@ -209,19 +217,28 @@ show_history = (
 )
 
 if show_history:
-    # claims配下の各申請フォルダの claim.json を読み込んで表示
-    records = []
-    if CLAIMS_DIR.exists():
-        for d in sorted(CLAIMS_DIR.glob("*/claim.json")):
-            try:
-                with open(d, "r", encoding="utf-8") as f:
-                    rec = json.load(f)
-                records.append(rec)
-            except Exception:
-                pass
-    if records:
-        df_hist = pd.DataFrame(records)
+    claims = list_claims()
+    if claims:
+        df_hist = pd.DataFrame([c.raw for c in claims])
         df_hist = df_hist.sort_values("created_at", ascending=False)
         st.dataframe(df_hist)
+
+        st.subheader("JIRA転送")
+        for claim in claims:
+            cols = st.columns([4, 3, 2, 2])
+            cols[0].markdown(f"**{claim.title or claim.claim_id}**")
+            cols[1].write(claim.applicant)
+            cols[2].write(f"{claim.total_amount:.0f} JPY")
+            if cols[3].button("JIRAへ転送", key=f"jira_{claim.claim_id}"):
+                try:
+                    issue_key, issue_url = JiraBackend().create_issue_from_claim_id(
+                        claim.claim_id
+                    )
+                    success_msg = f"JIRAにチケットを作成しました: {issue_key}"
+                    st.success(success_msg)
+                    if issue_url:
+                        st.write(issue_url)
+                except Exception as exc:  # pragma: no cover - UI feedback
+                    st.error(f"JIRA転送に失敗しました: {exc}")
     else:
         st.info("まだデータがありません。上のフォームで追加してください。")
