@@ -14,78 +14,72 @@ st.title("経費入力アプリ (デモ) — フェーズ2: 入力フォーム�
 if "expense_items" not in st.session_state:
     st.session_state["expense_items"] = []
 
-st.header("経費明細（編集可能なテーブル）")
+st.header("経費明細（追加・削除）")
 
-df_items = pd.DataFrame(st.session_state.get("expense_items", []))
-if df_items.empty:
-    # 空DataFrameでも支払日をオブジェクト型にしておく（FLOAT推論を防ぐ）
-    df_items = pd.DataFrame(
-        {
-            "支払日": pd.Series([], dtype="object"),
-            "店名": pd.Series([], dtype="object"),
-            "金額": pd.Series([], dtype="float"),
-            "内容": pd.Series([], dtype="object"),
-        }
-    )
-else:
-    # NaN を None にして dtype をオブジェクトへ寄せる
-    df_items = df_items.where(pd.notna(df_items), None)
-    # 支払日が float/NaN の場合は None に置換し、datetime.date へ変換
-    if "支払日" in df_items.columns:
-        df_items["支払日"] = df_items["支払日"].apply(
-            lambda v: (
-                None if (v is None or (isinstance(v, float) and pd.isna(v))) else v
-            )
+with st.form("add_item_form", clear_on_submit=True):
+    cols = st.columns([2, 3, 2, 4, 1])
+    with cols[0]:
+        new_date = st.date_input("支払日", value=datetime.now().date())
+    with cols[1]:
+        new_store = st.text_input("店名 (必須)")
+    with cols[2]:
+        new_amount = st.number_input(
+            "金額",
+            min_value=0,
+            value=0,
+            step=100,
+            format="%d",
         )
-        try:
-            dt = pd.to_datetime(df_items["支払日"], errors="coerce")
-            df_items["支払日"] = dt.dt.date
-        except Exception:
-            # 変換失敗時はそのまま（オブジェクト型維持）
-            pass
+    with cols[3]:
+        new_content = st.text_input("内容")
+    with cols[4]:
+        add_clicked = st.form_submit_button("追加")
 
-edited = st.data_editor(
-    df_items,
-    column_config={
-        "支払日": st.column_config.DateColumn("支払日", format="YYYY-MM-DD"),
-        "店名": st.column_config.TextColumn("店名"),
-        "金額": st.column_config.NumberColumn("金額", step=100, format="%d"),
-        "内容": st.column_config.TextColumn("内容"),
-    },
-    num_rows="dynamic",
-    key="items_table",
-)
-
-# セッションへ反映（空行は除外）
-st.session_state["expense_items"] = []
-for _, row in edited.iterrows():
-    store = row.get("店名")
-    content = row.get("内容")
-    amount = row.get("金額")
-    # リストが来た場合は先頭要素に正規化
-    if isinstance(store, list):
-        store = store[0] if store else ""
-    if isinstance(content, list):
-        content = content[0] if content else ""
-    if isinstance(amount, list):
-        amount = amount[0] if amount else 0
-    if not (store or content or amount not in [None, ""]):
-        continue
-    val_date = row.get("支払日")
-    iso_date = val_date.isoformat() if hasattr(val_date, "isoformat") else str(val_date)
-    amt = amount
+if add_clicked:
+    errors = []
+    if not (new_store or "").strip():
+        errors.append("店名は必須です。")
+    if new_date is None:
+        errors.append("支払日は必須です。")
     try:
-        amt_f = float(amt) if amt not in [None, ""] else 0.0
+        amount_f = float(new_amount)
     except Exception:
-        amt_f = 0.0
-    st.session_state["expense_items"].append(
-        {
-            "支払日": iso_date,
-            "店名": store or "",
-            "金額": amt_f,
-            "内容": content or "",
-        }
-    )
+        amount_f = 0.0
+    if amount_f <= 0:
+        errors.append("金額は 0 より大きい必要があります。")
+
+    if errors:
+        for e in errors:
+            st.error(e)
+    else:
+        st.session_state["expense_items"].append(
+            {
+                "支払日": new_date.isoformat(),
+                "店名": new_store.strip(),
+                "金額": amount_f,
+                "内容": (new_content or "").strip(),
+            }
+        )
+
+items = st.session_state.get("expense_items", [])
+if items:
+    st.subheader("登録済み明細")
+    header_cols = st.columns([2, 3, 2, 4, 1])
+    header_cols[0].markdown("**支払日**")
+    header_cols[1].markdown("**店名**")
+    header_cols[2].markdown("**金額**")
+    header_cols[3].markdown("**内容**")
+    header_cols[4].markdown("**削除**")
+
+    for i, it in enumerate(items):
+        row_cols = st.columns([2, 3, 2, 4, 1])
+        row_cols[0].write(it.get("支払日", ""))
+        row_cols[1].write(it.get("店名", ""))
+        row_cols[2].write(f"{(it.get('金額') or 0):.0f}")
+        row_cols[3].write(it.get("内容", ""))
+        if row_cols[4].button("×", key=f"del_{i}"):
+            st.session_state["expense_items"].pop(i)
+            st.rerun()
 
 # 合計の即時更新（明細の合計）
 items_sum = sum(
@@ -135,6 +129,10 @@ if submit:
         # 日付必須
         if not it.get("支払日"):
             errors.append(f"明細 {i} の支払日は必須です。")
+        # 店名必須
+        store = (it.get("店名") or "").strip()
+        if not store:
+            errors.append(f"明細 {i} の店名は必須です。")
         # 金額は正の数
         amt = it.get("金額")
         try:
