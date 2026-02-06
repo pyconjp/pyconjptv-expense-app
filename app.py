@@ -1,9 +1,10 @@
 import json
 import uuid
-import streamlit as st
-import pandas as pd
 from datetime import datetime
 from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 
 CLAIMS_DIR = Path("claims")
 
@@ -14,7 +15,6 @@ if "expense_items" not in st.session_state:
     st.session_state["expense_items"] = []
 
 st.header("経費明細（編集可能なテーブル）")
-import pandas as pd
 
 df_items = pd.DataFrame(st.session_state.get("expense_items", []))
 if df_items.empty:
@@ -33,9 +33,9 @@ else:
     # 支払日が float/NaN の場合は None に置換し、datetime.date へ変換
     if "支払日" in df_items.columns:
         df_items["支払日"] = df_items["支払日"].apply(
-            lambda v: None
-            if (v is None or (isinstance(v, float) and pd.isna(v)))
-            else v
+            lambda v: (
+                None if (v is None or (isinstance(v, float) and pd.isna(v))) else v
+            )
         )
         try:
             dt = pd.to_datetime(df_items["支払日"], errors="coerce")
@@ -182,11 +182,9 @@ if submit:
             "タイトル": title,
             "経費種別": expense_type,
             "合計金額": float(calc_sum),
-            "経費項目リスト": json.dumps(
-                st.session_state.get("expense_items", []), ensure_ascii=False
-            ),
+            "経費項目リスト": st.session_state.get("expense_items", []),
             "備考": note,
-            "attachments": json.dumps(saved_paths, ensure_ascii=False),
+            "attachments": saved_paths,
             "銀行名": bank_name,
             "支店名": branch_name,
             "口座種別": account_type,
