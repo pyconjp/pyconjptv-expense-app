@@ -202,7 +202,13 @@ if submit:
             for p in saved_paths:
                 st.write(p)
 
-if st.checkbox("履歴を表示する"):
+show_history = (
+    st.toggle("履歴を表示する")
+    if hasattr(st, "toggle")
+    else st.checkbox("履歴を表示する")
+)
+
+if show_history:
     # claims配下の各申請フォルダの claim.json を読み込んで表示
     records = []
     if CLAIMS_DIR.exists():
